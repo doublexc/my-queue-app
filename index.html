@@ -10,7 +10,14 @@
 <body class="bg-gray-100 min-h-screen p-4 md:p-8">
 
     <div class="max-w-6xl mx-auto grid grid-cols-1 md:grid-cols-2 gap-8">
-        
+
+        <div id="restoreSection" class="mb-4 p-4 bg-gray-50 rounded-xl border border-dashed border-gray-300">
+    <p class="text-xs text-gray-500 mb-2 font-bold">มีคิวเดิมอยู่แล้ว?</p>
+    <div class="flex gap-2">
+        <input type="text" id="restoreID" placeholder="รหัสคิว 6 หลัก" class="flex-1 p-2 border rounded-lg text-sm uppercase">
+        <button onclick="restoreOwnerSession()" class="bg-gray-600 text-white px-4 py-2 rounded-lg text-sm font-bold">กู้คืน</button>
+    </div>
+</div>
         <div class="bg-white p-6 rounded-2xl shadow-lg border-t-4 border-blue-500">
             <h2 class="text-2xl font-bold mb-4 text-blue-600">สร้างคิวใหม่</h2>
             <button onclick="createNewQueue()" id="btnCreate" class="w-full bg-blue-500 text-white py-3 rounded-xl hover:bg-blue-600 transition font-bold shadow-md">
@@ -96,100 +103,97 @@
     </div>
 
     <script>
-        const API_URL = "https://script.google.com/macros/s/AKfycbzXDGS2lu5oAXJlB5ieDS-7znt7qWABO7d0ym9D9LD5DPqH1rVQhlqDlx2byY9tbpJb/exec";
+        const API_URL = "URL_ของคุณ";
 
-        // --- 1. ฝั่งเจ้าของคิว ---
-        async function createNewQueue() {
-            const res = await fetch(API_URL, { method: 'POST', body: JSON.stringify({ action: 'create' }) });
-            const data = await res.json();
-            if(data.status === 'success') {
-                document.getElementById('displayQueueID').innerText = data.queueID;
-                document.getElementById('ownerPanel').classList.remove('hidden');
-                document.getElementById('btnCreate').classList.add('hidden');
-                refreshOwnerData(data.queueID);
-            }
+// --- ตรวจสอบตอนโหลดหน้าเว็บ (Auto Restore) ---
+window.onload = () => {
+    const savedOwnerID = localStorage.getItem('ownerQueueID');
+    const savedUserID = localStorage.getItem('userQueueID');
+    const savedMyNum = localStorage.getItem('myNumber');
+
+    if (savedOwnerID) {
+        document.getElementById('displayQueueID').innerText = savedOwnerID;
+        document.getElementById('ownerPanel').classList.remove('hidden');
+        document.getElementById('btnCreate').classList.add('hidden');
+        document.getElementById('restoreSection').classList.add('hidden');
+        refreshOwnerData(savedOwnerID);
+    }
+    
+    if (savedUserID && savedMyNum) {
+        document.getElementById('inputQueueID').value = savedUserID;
+        document.getElementById('myNumber').innerText = savedMyNum;
+        checkQueueStatus(); // โชว์แผงควบคุมทันที
+    }
+};
+
+// --- ฝั่งเจ้าของ ---
+async function createNewQueue() {
+    const res = await fetch(API_URL, { method: 'POST', body: JSON.stringify({ action: 'create' }) });
+    const data = await res.json();
+    if(data.status === 'success') {
+        localStorage.setItem('ownerQueueID', data.queueID); // บันทึกสิทธิ์เจ้าของ
+        location.reload(); // รีโหลดเพื่อเข้าสู่โหมดเจ้าของ
+    }
+}
+
+function restoreOwnerSession() {
+    const id = document.getElementById('restoreID').value.toUpperCase();
+    if(id.length === 6) {
+        localStorage.setItem('ownerQueueID', id);
+        location.reload();
+    }
+}
+
+async function refreshOwnerData(qID) {
+    const res = await fetch(API_URL, { method: 'POST', body: JSON.stringify({ action: 'status', queueID: qID }) });
+    const data = await res.json();
+    if (data.status === 'success') {
+        document.getElementById('currentNum').innerText = data.currentNumber;
+        document.getElementById('latestNum').innerText = data.latestNumber;
+        document.getElementById('ownerVCode').innerText = data.vCode;
+    }
+}
+
+// --- ฝั่งผู้ใช้ ---
+async function joinQueue() {
+    const qID = document.getElementById('inputQueueID').value.toUpperCase();
+    const res = await fetch(API_URL, { method: 'POST', body: JSON.stringify({ action: 'join', queueID: qID }) });
+    const data = await res.json();
+    if(data.status === 'success') {
+        localStorage.setItem('userQueueID', qID);
+        localStorage.setItem('myNumber', data.customerNumber);
+        document.getElementById('myNumber').innerText = data.customerNumber;
+        document.getElementById('myQueueTicket').classList.remove('hidden');
+        document.getElementById('btnJoin').classList.add('hidden');
+        updateUserUI(qID);
+    }
+}
+
+async function updateUserUI(qID) {
+    const res = await fetch(API_URL, { method: 'POST', body: JSON.stringify({ action: 'status', queueID: qID }) });
+    const data = await res.json();
+    if (data.status === 'success') {
+        document.getElementById('userCurrentNum').innerText = data.currentNumber;
+        document.getElementById('avgTime').innerText = data.avgTime;
+        
+        // คำนวณเวลาคาดการณ์ (ข้อ 2)
+        const myNum = parseInt(document.getElementById('myNumber').innerText);
+        if (myNum > 0) {
+            const waitCount = myNum - data.currentNumber;
+            const avg = parseFloat(data.avgTime) || 0;
+            const est = waitCount > 0 ? Math.ceil(waitCount * avg) : 0;
+            document.getElementById('estTime').innerText = est + " นาที";
         }
+    }
+}
 
-        async function updateNumber(step) {
-            const qID = document.getElementById('displayQueueID').innerText;
-            const type = (step === 1) ? 'plus' : 'minus';
-            Swal.fire({ title: 'กำลังอัปเดต...', allowOutsideClick: false, didOpen: () => { Swal.showLoading() } });
-            
-            const res = await fetch(API_URL, { method: 'POST', body: JSON.stringify({ action: 'update', queueID: qID, type: type }) });
-            const data = await res.json();
-            if(data.status === 'success') {
-                refreshOwnerData(qID);
-                Swal.close();
-            }
-        }
-
-        async function refreshOwnerData(qID) {
-            try {
-                const res = await fetch(API_URL, { method: 'POST', body: JSON.stringify({ action: 'status', queueID: qID }) });
-                const data = await res.json();
-                if (data.status === 'success') {
-                    document.getElementById('currentNum').innerText = data.currentNumber;
-                    document.getElementById('latestNum').innerText = data.latestNumber;
-                    document.getElementById('ownerVCode').innerText = data.vCode;
-                }
-            } catch (e) { console.log("Refresh error"); }
-        }
-
-        // --- 2. ฝั่งผู้ใช้งาน ---
-        async function checkQueueStatus() {
-            const qID = document.getElementById('inputQueueID').value.toUpperCase();
-            if(!qID) return Swal.fire('กรุณาใส่รหัสคิว', '', 'warning');
-            Swal.fire({ title: 'กำลังตรวจสอบ...', didOpen: () => { Swal.showLoading() } });
-            
-            await updateUserUI(qID);
-            document.getElementById('userPanel').classList.remove('hidden');
-            Swal.close();
-        }
-
-        async function joinQueue() {
-            const qID = document.getElementById('inputQueueID').value.toUpperCase();
-            Swal.fire({ title: 'กำลังจองคิว...', didOpen: () => { Swal.showLoading() } });
-            const res = await fetch(API_URL, { method: 'POST', body: JSON.stringify({ action: 'join', queueID: qID }) });
-            const data = await res.json();
-            if(data.status === 'success') {
-                document.getElementById('myQueueTicket').classList.remove('hidden');
-                document.getElementById('btnJoin').classList.add('hidden');
-                document.getElementById('myNumber').innerText = data.customerNumber;
-                document.getElementById('myVCode').value = data.vCode;
-                Swal.fire('จองสำเร็จ!', `ลำดับของคุณคือ ${data.customerNumber}`, 'success');
-                updateUserUI(qID);
-            }
-        }
-
-        async function updateUserUI(qID) {
-            try {
-                const res = await fetch(API_URL, { method: 'POST', body: JSON.stringify({ action: 'status', queueID: qID }) });
-                const data = await res.json();
-                if (data.status === 'success') {
-                    document.getElementById('userCurrentNum').innerText = data.currentNumber;
-                    const myNum = parseInt(document.getElementById('myNumber').innerText);
-                    if (myNum > 0) {
-                        const waitCount = myNum - data.currentNumber;
-                        document.getElementById('estTime').innerText = (waitCount > 0 ? waitCount * 5 : 0) + " นาที";
-                    }
-                }
-            } catch (e) { console.log("User UI update error"); }
-        }
-
-        // --- 3. ระบบ Polling ---
-        setInterval(() => {
-            const qID = document.getElementById('inputQueueID').value.toUpperCase();
-            const ownerQID = document.getElementById('displayQueueID').innerText;
-            if (qID && qID.length === 6) updateUserUI(qID);
-            if (ownerQID && ownerQID !== "------") refreshOwnerData(ownerQID);
-        }, 5000);
-
-        function copyVCode() {
-            const el = document.getElementById('myVCode');
-            el.select();
-            document.execCommand('copy');
-            Swal.fire({ title: 'คัดลอกแล้ว!', icon: 'success', toast: true, position: 'top-end', timer: 2000, showConfirmButton: false });
-        }
+// ยกเลิกคิว (ล้างค่าทั้งหมด)
+function cancelQueue() {
+    if(confirm("ยืนยันการยกเลิกคิว? ข้อมูลจะถูกลบจากเครื่องคุณด้วย")) {
+        localStorage.clear();
+        location.reload();
+    }
+}
     </script>
 </body>
 </html>
