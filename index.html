@@ -18,7 +18,7 @@
                 <p class="text-xs text-gray-500 mb-2 font-bold">มีคิวเดิมอยู่แล้ว?</p>
                 <div class="flex gap-2">
                     <input type="text" id="restoreID" placeholder="รหัสคิว 6 หลัก" class="flex-1 p-2 border rounded-lg text-sm uppercase">
-                    <button onclick="restoreOwnerSession()" class="bg-gray-600 text-white px-4 py-2 rounded-lg text-sm font-bold">กู้คืน</button>
+                    <button onclick="restoreOwnerSession()" class="bg-gray-600 text-white px-4 py-2 rounded-lg text-sm font-bold shadow">กู้คืน</button>
                 </div>
             </div>
 
@@ -27,9 +27,10 @@
             </button>
 
             <div id="ownerPanel" class="mt-6 hidden">
-                <div class="bg-blue-50 p-4 rounded-lg text-center">
+                <div class="bg-blue-50 p-4 rounded-lg text-center relative">
                     <p class="text-sm text-gray-500">รหัสคิวของคุณคือ</p>
                     <h1 id="displayQueueID" class="text-4xl font-black text-blue-700 tracking-widest">------</h1>
+                    <button onclick="manualRefreshOwner()" class="mt-2 text-xs bg-white text-blue-500 px-3 py-1 rounded-full shadow-sm border border-blue-200 hover:bg-blue-50">🔄 อัปเดตข้อมูล</button>
                 </div>
                 
                 <div class="flex items-center justify-between mt-6 px-4">
@@ -64,6 +65,9 @@
             </div>
 
             <div id="userPanel" class="mt-6 hidden">
+                <div class="flex justify-end mb-2">
+                    <button onclick="manualRefreshUser()" class="text-xs bg-purple-50 text-purple-500 px-3 py-1 rounded-full border border-purple-100">🔄 อัปเดตสถานะ</button>
+                </div>
                 <div class="grid grid-cols-2 gap-4 mb-4 text-center">
                     <div class="bg-purple-50 p-4 rounded-xl border border-purple-100">
                         <p class="text-[10px] text-gray-500 font-bold uppercase">กำลังเรียก</p>
@@ -96,6 +100,7 @@
                             </div>
                         </div>
                     </div>
+                    <button onclick="cancelMyQueue()" class="w-full mt-4 text-red-500 text-xs underline hover:text-red-700">ยกเลิกคิวนี้</button>
                 </div>
             </div>
         </div>
@@ -105,6 +110,7 @@
     <script>
         const API_URL = "https://script.google.com/macros/s/AKfycbzXDGS2lu5oAXJlB5ieDS-7znt7qWABO7d0ym9D9LD5DPqH1rVQhlqDlx2byY9tbpJb/exec";
 
+        // ตรวจสอบข้อมูลเดิมเมื่อโหลดหน้า
         window.onload = () => {
             const savedOwnerID = localStorage.getItem('ownerQueueID');
             const savedUserID = localStorage.getItem('userQueueID');
@@ -126,6 +132,15 @@
             }
         };
 
+        // --- ระบบอัปเดตอัตโนมัติ (15 นาที) ---
+        setInterval(() => {
+            const ownerID = localStorage.getItem('ownerQueueID');
+            const userID = localStorage.getItem('userQueueID');
+            if (ownerID) refreshOwnerData(ownerID);
+            if (userID) updateUserUI(userID);
+        }, 900000); 
+
+        // --- ฟังก์ชันฝั่งเจ้าของ ---
         async function createNewQueue() {
             Swal.fire({ title: 'กำลังสร้างคิว...', didOpen: () => { Swal.showLoading() } });
             const res = await fetch(API_URL, { method: 'POST', body: JSON.stringify({ action: 'create' }) });
@@ -141,37 +156,14 @@
             if(id.length === 6) {
                 localStorage.setItem('ownerQueueID', id);
                 location.reload();
-            } else {
-                Swal.fire('รหัสไม่ถูกต้อง', 'กรุณาใส่รหัส 6 หลัก', 'error');
             }
-        }
-
-        async function refreshOwnerData(qID) {
-            const ownerToken = localStorage.getItem('ownerQueueID');
-            try {
-                const res = await fetch(API_URL, { 
-                    method: 'POST', 
-                    body: JSON.stringify({ action: 'status', queueID: qID, ownerToken: ownerToken }) 
-                });
-                const data = await res.json();
-                if (data.status === 'success') {
-                    document.getElementById('currentNum').innerText = data.currentNumber;
-                    document.getElementById('latestNum').innerText = data.latestNumber;
-                    document.getElementById('ownerVCode').innerText = data.vCode;
-                }
-            } catch (e) { console.log("Refresh error"); }
         }
 
         async function updateNumber(step) {
             const qID = document.getElementById('displayQueueID').innerText;
-            if (qID === "------") return;
             const type = (step === 1) ? 'plus' : 'minus';
-            
-            Swal.fire({ title: 'อัปเดตลำดับ...', allowOutsideClick: false, didOpen: () => { Swal.showLoading() } });
-            const res = await fetch(API_URL, { 
-                method: 'POST', 
-                body: JSON.stringify({ action: 'update', queueID: qID, type: type }) 
-            });
+            Swal.fire({ title: 'อัปเดต...', allowOutsideClick: false, didOpen: () => { Swal.showLoading() } });
+            const res = await fetch(API_URL, { method: 'POST', body: JSON.stringify({ action: 'update', queueID: qID, type: type }) });
             const data = await res.json();
             if(data.status === 'success') {
                 refreshOwnerData(qID);
@@ -179,17 +171,36 @@
             }
         }
 
+        async function refreshOwnerData(qID) {
+            const ownerToken = localStorage.getItem('ownerQueueID');
+            try {
+                const res = await fetch(API_URL, { method: 'POST', body: JSON.stringify({ action: 'status', queueID: qID, ownerToken: ownerToken }) });
+                const data = await res.json();
+                if (data.status === 'success') {
+                    document.getElementById('currentNum').innerText = data.currentNumber;
+                    document.getElementById('latestNum').innerText = data.latestNumber;
+                    document.getElementById('ownerVCode').innerText = data.vCode;
+                }
+            } catch (e) { console.error(e); }
+        }
+
+        function manualRefreshOwner() {
+            const ownerID = localStorage.getItem('ownerQueueID');
+            if(ownerID) {
+                refreshOwnerData(ownerID);
+                Swal.fire({ title: 'อัปเดตแล้ว', icon: 'success', toast: true, position: 'top', timer: 1500, showConfirmButton: false });
+            }
+        }
+
+        // --- ฟังก์ชันฝั่งผู้ใช้ ---
         async function checkQueueStatus() {
             const qID = document.getElementById('inputQueueID').value.toUpperCase();
-            if(!qID) return Swal.fire('กรุณาใส่รหัสคิว', '', 'warning');
-            
+            if(!qID) return;
             const res = await fetch(API_URL, { method: 'POST', body: JSON.stringify({ action: 'status', queueID: qID }) });
             const data = await res.json();
             if (data.status === 'success') {
                 document.getElementById('userPanel').classList.remove('hidden');
                 updateUserUI(qID);
-            } else {
-                Swal.fire('ไม่พบรหัสคิว', '', 'error');
             }
         }
 
@@ -201,7 +212,9 @@
             if(data.status === 'success') {
                 localStorage.setItem('userQueueID', qID);
                 localStorage.setItem('myNumber', data.customerNumber);
+                localStorage.setItem('myVCode', data.vCode); // บันทึก VCode ลงเครื่อง
                 document.getElementById('myNumber').innerText = data.customerNumber;
+                document.getElementById('myVCode').value = data.vCode;
                 document.getElementById('myQueueTicket').classList.remove('hidden');
                 document.getElementById('btnJoin').classList.add('hidden');
                 updateUserUI(qID);
@@ -216,6 +229,10 @@
                 if (data.status === 'success') {
                     document.getElementById('userCurrentNum').innerText = data.currentNumber;
                     document.getElementById('avgTime').innerText = data.avgTime;
+                    
+                    const savedVCode = localStorage.getItem('myVCode');
+                    if (savedVCode) document.getElementById('myVCode').value = savedVCode;
+
                     const myNum = parseInt(document.getElementById('myNumber').innerText);
                     if (myNum > 0) {
                         const waitCount = myNum - data.currentNumber;
@@ -227,13 +244,40 @@
             } catch (e) { }
         }
 
-        // ระบบ Polling อัปเดตอัตโนมัติทุก 5 วินาที
-        setInterval(() => {
-            const ownerID = localStorage.getItem('ownerQueueID');
+        function manualRefreshUser() {
             const userID = localStorage.getItem('userQueueID');
-            if (ownerID) refreshOwnerData(ownerID);
-            if (userID) updateUserUI(userID);
-        }, 5000);
+            if(userID) {
+                updateUserUI(userID);
+                Swal.fire({ title: 'อัปเดตแล้ว', icon: 'success', toast: true, position: 'top', timer: 1500, showConfirmButton: false });
+            }
+        }
+
+        async function cancelMyQueue() {
+            const qID = localStorage.getItem('userQueueID');
+            const myNum = localStorage.getItem('myNumber');
+            const vCode = localStorage.getItem('myVCode');
+
+            const result = await Swal.fire({
+                title: 'ยืนยันการยกเลิก?',
+                text: "ลำดับของคุณจะถูกลบออกจากระบบ",
+                icon: 'warning',
+                showCancelButton: true,
+                confirmButtonText: 'ใช่, ยกเลิกคิว',
+                cancelButtonText: 'ไม่'
+            });
+
+            if (result.isConfirmed) {
+                const res = await fetch(API_URL, {
+                    method: 'POST',
+                    body: JSON.stringify({ action: 'cancelCustomer', queueID: qID, customerNumber: myNum, vCode: vCode })
+                });
+                const data = await res.json();
+                if(data.status === 'success') {
+                    localStorage.clear();
+                    Swal.fire('ยกเลิกแล้ว', '', 'success').then(() => location.reload());
+                }
+            }
+        }
 
         function copyVCode() {
             const el = document.getElementById('myVCode');
@@ -243,19 +287,10 @@
         }
 
         function cancelQueue() {
-            Swal.fire({
-                title: 'ยกเลิกคิว?',
-                text: "ข้อมูลในเครื่องคุณจะถูกล้างทั้งหมด",
-                icon: 'warning',
-                showCancelButton: true,
-                confirmButtonText: 'ตกลง',
-                cancelButtonText: 'ยกเลิก'
-            }).then((result) => {
-                if (result.isConfirmed) {
-                    localStorage.clear();
-                    location.reload();
-                }
-            });
+            if(confirm("ยืนยันการยกเลิกคิวหลัก? ข้อมูลในเครื่องจะหายทั้งหมด")) {
+                localStorage.clear();
+                location.reload();
+            }
         }
     </script>
 </body>
